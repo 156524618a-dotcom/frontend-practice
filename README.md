@@ -15,3 +15,7 @@
 练习二：进入 `02-counter`，运行 `npm install` 和 `npm run dev`，打开终端中的地址（默认端口 5174）。
 
 练习三：进入 `03-product-filter`，运行 `npm install` 和 `npm run dev`，打开终端中的地址（默认端口 5175）。
+
+## 可靠性软件界面原型
+
+[打开软件框架与任务总览](./reliability-workbench)：React + TypeScript + Ant Design 6，包含源码、运行说明和效果截图。当前为使用演示数据的本地原型，在线交互演示尚未部署。
