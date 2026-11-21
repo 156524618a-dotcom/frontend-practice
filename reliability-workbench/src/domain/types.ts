@@ -11,6 +11,7 @@ export interface AllocationTask {
   name: string;
   code: string;
   description: string;
+  modelId?: string;
   modelName: string;
   modelType: string;
 }

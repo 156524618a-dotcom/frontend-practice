@@ -10,7 +10,7 @@ import re
 from playwright.sync_api import sync_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / 'docs' / 'screenshots'
+OUTPUT = Path(os.environ.get('WORKBENCH_SCREENSHOTS', str(ROOT / 'docs' / 'screenshots')))
 OUTPUT.mkdir(parents=True, exist_ok=True)
 URL = os.environ.get('WORKBENCH_URL', 'http://127.0.0.1:5180/')
 
@@ -41,10 +41,10 @@ with sync_playwright() as p:
     expect(start).to_be_enabled()
     expect(main.locator('.selection-summary')).to_contain_text('系统可靠性分配')
     start.click()
-    expect(main.get_by_role('heading', name='当前任务信息')).to_be_visible()
-    expect(main.locator('.detail-panel')).to_contain_text('P001')
-    expect(main.locator('.detail-panel')).to_contain_text('系统模型-01')
-    expect(main.locator('.detail-panel')).to_contain_text('分析工作区待接入')
+    expect(main.get_by_role('heading', name='分配分析', exact=True)).to_be_visible()
+    expect(main.locator('.analysis-task-info')).to_contain_text('P001')
+    expect(main.locator('.analysis-task-info')).to_contain_text('系统模型-01')
+    expect(main.get_by_role('button', name='优化计算')).to_be_enabled()
     page.screenshot(path=str(OUTPUT / 'task-info.png'), full_page=True)
     page.get_by_role('button', name='返回任务总览').click()
     expect(start).to_be_enabled()
@@ -99,7 +99,7 @@ with sync_playwright() as p:
     expect(start).to_be_disabled()
     page.screenshot(path=str(OUTPUT / 'empty-project.png'), full_page=True)
 
-    # 新建的是项目，不是下一阶段的新建分配任务。
+    # 在空项目中也能创建项目记录和分配任务。
     sidebar.get_by_role('button', name='新建项目', exact=True).click()
     dialog = page.get_by_role('dialog', name='新建项目', exact=True)
     dialog.get_by_role('button', name='创建项目').click()
@@ -116,11 +116,106 @@ with sync_playwright() as p:
     expect(sidebar.locator('.current-project')).to_contain_text('本地测试项目')
     expect(main.get_by_text('当前项目暂无分配任务', exact=True)).to_be_visible()
     assert len(json.loads(page.evaluate("localStorage.getItem('reliability-workbench.projects.v1')"))) == 4
+    main.get_by_role('button', name='新建任务', exact=True).click()
+    dialog = page.get_by_role('dialog', name='新建任务', exact=True)
+    create = dialog.get_by_role('button', name='创建任务', exact=True)
+    create.click()
+    for field in ['任务名称', '任务编号', '任务说明']:
+        expect(dialog.get_by_text(f'请输入{field}', exact=True)).to_be_visible()
+    expect(dialog.get_by_text('请先选择一个模型', exact=True)).to_be_visible()
+    dialog.get_by_label('任务名称', exact=True).fill('本地分配任务')
+    dialog.get_by_label('任务编号', exact=True).fill('TASK-LOCAL')
+    dialog.get_by_label('任务说明', exact=True).fill('验证任务创建和等分配流程')
+    model_search = dialog.get_by_role('textbox', name='按模型名称搜索')
+    model_search.fill('不存在的模型')
+    expect(dialog.get_by_text('未找到匹配的模型', exact=True)).to_be_visible()
+    model_search.fill(' 系统模型 ')
+    model_radio = dialog.get_by_role('radio', name='选择模型：系统模型-01', exact=True)
+    model_radio.focus()
+    page.keyboard.press('Space')
+    expect(model_radio).to_be_checked()
+    expect(dialog.get_by_role('heading', name='模型预览：系统模型-01')).to_be_visible()
+    zoom_in = dialog.get_by_role('button', name='放大模型', exact=True)
+    for _ in range(4):
+        zoom_in.click()
+    expect(dialog.get_by_text('200%', exact=True)).to_be_visible()
+    canvas = dialog.get_by_role('region', name='可靠性框图，可拖动或用方向键滚动')
+    block = canvas.get_by_text('输入模块', exact=True).bounding_box()
+    assert block
+    page.mouse.move(block['x'] + block['width'] / 2, block['y'] + block['height'] / 2)
+    page.mouse.down()
+    page.mouse.move(block['x'] - 25, block['y'] + block['height'] / 2, steps=4)
+    page.mouse.up()
+    assert canvas.evaluate('(element) => element.scrollLeft > 0')
+    dialog.get_by_role('button', name='重置模型视图', exact=True).click()
+    expect(dialog.get_by_text('100%', exact=True)).to_be_visible()
+    model_search.fill('')
+    page.get_by_text('项目已创建并保存到本机', exact=True).wait_for(state='hidden')
+    page.set_viewport_size({'width': 1100, 'height': 800})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    bounds = create.bounding_box()
+    assert bounds and bounds['x'] + bounds['width'] <= 1100 and bounds['y'] + bounds['height'] <= 800
+    page.set_viewport_size({'width': 1440, 'height': 900})
+    page.screenshot(path=str(OUTPUT / 'create-task.png'))
+    create.click()
+    expect(dialog).not_to_be_visible()
+    expect(main.get_by_role('button', name='新建任务', exact=True)).to_be_focused()
+    expect(main.locator('.selection-summary')).to_contain_text('本地分配任务')
+    expect(main.get_by_role('status')).to_contain_text('共 1 项任务')
+    start.click()
+    analysis = main.get_by_role('region', name='等分配分析工作区')
+    optimize = analysis.get_by_role('button', name='优化计算')
+    after = analysis.locator('output[aria-label="分配后系统可靠度"]')
+    expect(after).to_have_text('—')
+    optimize.click()
+    expect(after).to_have_text('0.9357')
+    expect(analysis.get_by_text('需提升', exact=True)).to_have_count(3)
+    expect(analysis.get_by_text('无需提升', exact=True)).to_have_count(1)
+    page.get_by_text('任务已创建并保存到本机', exact=True).wait_for(state='hidden')
+    page.set_viewport_size({'width': 1100, 'height': 800})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    bounds = after.bounding_box()
+    assert bounds and bounds['y'] + bounds['height'] <= 800
+    page.set_viewport_size({'width': 1440, 'height': 900})
+    page.screenshot(path=str(OUTPUT / 'equal-allocation.png'))
+    duration = analysis.get_by_role('spinbutton', name='任务时间')
+    duration.fill('500')
+    expect(after).to_have_text('—')
+    expect(analysis.get_by_text('参数已修改，请重新计算。')).to_be_visible()
+    optimize.click()
+    expect(analysis.locator('output[aria-label="当前系统可靠度"]')).to_have_text('0.9574')
+    target = analysis.get_by_role('spinbutton', name='目标可靠度')
+    target.fill('1')
+    optimize.click()
+    expect(analysis.get_by_text('请输入大于 0 且小于 1 的值', exact=True)).to_be_visible()
+    target.fill('0.93')
+    for checkbox in analysis.get_by_role('checkbox').all():
+        checkbox.uncheck()
+    optimize.click()
+    expect(analysis.get_by_text('请至少勾选一个参与分配的组件。')).to_be_visible()
+    analysis.get_by_role('checkbox', name='参与分配：输入模块').check()
+    target.fill('0.999')
+    optimize.click()
+    expect(analysis.get_by_text('仅提升所选组件无法达到该系统目标，请增加参与组件或降低目标可靠度。')).to_be_visible()
+    expect(after).to_have_text('—')
+    main.get_by_role('button', name='返回任务总览').click()
+    expect(start).to_be_enabled()
+    open_project('平台可靠性基线')
+    expect(main.get_by_role('status')).to_contain_text('共 8 项任务')
+    main.get_by_role('button', name='新建任务', exact=True).click()
+    dialog = page.get_by_role('dialog', name='新建任务', exact=True)
+    dialog.get_by_label('任务编号', exact=True).fill(' p001 ')
+    dialog.get_by_role('button', name='创建任务', exact=True).click()
+    expect(dialog.get_by_text('当前项目中已有此任务编号', exact=True)).to_be_visible()
+    dialog.get_by_role('button', name=re.compile(r'取\s*消')).click()
+    expect(dialog).not_to_be_visible()
+    main.get_by_role('button', name='新建任务', exact=True).click()
+    expect(dialog.get_by_label('任务编号', exact=True)).to_have_value('')
+    dialog.get_by_role('button', name=re.compile(r'取\s*消')).click()
     page.reload(wait_until='networkidle')
-    sidebar.get_by_role('button', name='打开项目', exact=True).click()
-    expect(page.get_by_role('dialog').get_by_text('本地测试项目', exact=True)).to_be_visible()
-    page.get_by_role('dialog').get_by_role('button', name=re.compile(r'取\s*消')).click()
-    expect(page.get_by_role('dialog', name='打开项目', exact=True)).not_to_be_visible()
+    open_project('本地测试项目')
+    expect(main.get_by_role('radio', name='选择任务：本地分配任务')).to_be_visible()
+    open_project('平台可靠性基线')
 
     for width, height in [(1366,768),(1440,900),(1920,1080),(1100,800)]:
         page.set_viewport_size({'width': width, 'height': height})
@@ -131,7 +226,10 @@ with sync_playwright() as p:
             page.screenshot(path=str(OUTPUT / f'overview-{width}.png'), full_page=True)
 
     # 存储内容损坏时恢复默认项目，不能白屏。
-    page.evaluate("localStorage.setItem('reliability-workbench.projects.v1', '{broken')")
+    page.evaluate("""() => {
+      localStorage.setItem('reliability-workbench.projects.v1', '{broken');
+      localStorage.setItem('reliability-workbench.allocation-tasks.v1', '{broken');
+    }""")
     page.reload(wait_until='networkidle')
     expect(sidebar.locator('.current-project')).to_contain_text('平台可靠性基线')
     expect(page.get_by_role('status')).to_contain_text('共 8 项任务')
@@ -140,5 +238,6 @@ with sync_playwright() as p:
     print(json.dumps({'result': 'passed', 'checks': ['search', 'pagination', 'single selection', 'keyboard selection',
         'start disabled state', 'task identity', 'menu routing', 'browser back', 'help', 'project isolation',
         'empty project', 'project validation', 'local persistence', 'corrupt storage recovery', 'desktop layouts',
-        'no remote runtime requests'], 'warnings': warnings, 'errors': errors}, ensure_ascii=False))
+        'task creation and validation', 'model search, selection, zoom and pan', 'task persistence',
+        'equal allocation and stale results', 'no remote runtime requests'], 'warnings': warnings, 'errors': errors}, ensure_ascii=False))
     browser.close()

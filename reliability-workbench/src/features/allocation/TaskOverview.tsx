@@ -3,8 +3,13 @@ import { Button, Empty, Input, Pagination, Space, Table, Tooltip } from 'antd';
 import { ArrowLeftOutlined, ArrowRightOutlined, InfoCircleOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import type { TableColumnsType } from 'antd';
 import type { AllocationTask } from '../../domain/types';
+import { CreateTaskDialog, type NewTaskValues } from './CreateTaskDialog';
 
-interface Props { tasks: AllocationTask[]; onStart: (task: AllocationTask) => void }
+interface Props {
+  tasks: AllocationTask[];
+  onStart: (task: AllocationTask) => void;
+  onCreate: (values: NewTaskValues) => AllocationTask | undefined;
+}
 
 const columns: TableColumnsType<AllocationTask> = [
   { title: '任务名称', dataIndex: 'name', key: 'name', width: '28%', render: (name) => <span className="task-name">{name}</span> },
@@ -14,10 +19,11 @@ const columns: TableColumnsType<AllocationTask> = [
   { title: '模型名称', dataIndex: 'modelName', key: 'modelName', width: '23%' },
 ];
 
-export function TaskOverview({ tasks, onStart }: Props) {
+export function TaskOverview({ tasks, onStart, onCreate }: Props) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const pageSize = 5;
   const keyword = query.trim().toLowerCase();
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(keyword));
@@ -30,12 +36,21 @@ export function TaskOverview({ tasks, onStart }: Props) {
     setSelectedId(null);
   }
 
+  function handleCreate(values: NewTaskValues) {
+    const task = onCreate(values);
+    if (!task) return;
+    setQuery('');
+    setPage(1);
+    setSelectedId(task.id);
+    setCreateOpen(false);
+  }
+
   return (
     <section className="allocation-page" aria-labelledby="allocation-title">
       <h1 id="allocation-title">可靠性分配</h1>
       <section className="task-overview" aria-labelledby="overview-title">
         <div className="overview-heading"><h2 id="overview-title">任务总览</h2>
-          <Tooltip title="新建任务与模型选择将在下一阶段实现"><span><Button type="primary" icon={<PlusOutlined aria-hidden="true" />} disabled>新建</Button></span></Tooltip>
+          <Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={() => setCreateOpen(true)}>新建任务</Button>
         </div>
         <label className="sr-only" htmlFor="task-search">按任务名称搜索</label>
         <Input id="task-search" placeholder="请输入任务名称" suffix={<SearchOutlined aria-hidden="true" />} allowClear
@@ -51,7 +66,7 @@ export function TaskOverview({ tasks, onStart }: Props) {
             locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={tasks.length === 0 ? '当前项目暂无分配任务' : '未找到匹配的任务'}>
               {query && <Button type="link" onClick={() => changeSearch('')}>清空搜索</Button>}
-              {tasks.length === 0 && <p className="empty-hint">后续可通过“新建任务”关联已建立的可靠性模型。</p>}
+              {tasks.length === 0 && <p className="empty-hint">点击“新建任务”，选择一个模型开始。</p>}
             </Empty> }} />
           <div className="table-pagination"><span className="table-count" role="status">共 {filtered.length} 项任务{keyword ? ' · 已筛选' : ''}</span>
             <Pagination current={page} pageSize={pageSize} total={filtered.length} onChange={setPage} size="small" showSizeChanger={false}
@@ -62,6 +77,7 @@ export function TaskOverview({ tasks, onStart }: Props) {
       <div className="overview-footer"><p className="selection-summary" aria-live="polite"><InfoCircleOutlined aria-hidden="true" />{selectedTask ? `已选择：${selectedTask.name}` : '请选择一项任务，再开始分配分析'}</p>
         <Space><Button type="primary" disabled={!selectedTask} onClick={() => selectedTask && onStart(selectedTask)}>开始分配分析</Button></Space>
       </div>
+      <CreateTaskDialog open={createOpen} tasks={tasks} onCreate={handleCreate} onClose={() => setCreateOpen(false)} />
     </section>
   );
 }
